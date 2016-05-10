@@ -5,6 +5,8 @@ import java.net.InetAddress;
 import java.io.IOException;
 import java.util.Scanner;
 import java.util.Hashtable;
+import java.util.Arrays;
+import java.util.Random;
 import java.time.Instant;
 
 import java.net.UnknownHostException;
@@ -16,10 +18,14 @@ public class RnditsTestSuite{
     static String VEHICLE_ADAPTER_IP = "127.0.0.1";
     static int VEHICLE_ADAPTER_UDP_PORT = 5000;
     static int RECEIVE_PORT = 5001;
-    static int MAX_UDP_SIZE = 2000;
+    //static int MAX_UDP_SIZE = 2000;
+    static int MAX_UDP_SIZE = 300;
+    
     static int CAM_RATE = 25;
     static int DENM_RATE = 10;
     static int ICLCM_RATE = 25;
+    static int RNDM_RATE = 1;
+    
     static int verbosity = 2;
     static int STATION_ID = 100;
     static int NUM_VEHICLES = 1;
@@ -28,11 +34,13 @@ public class RnditsTestSuite{
     static byte[] camData;
     static byte[] denmData;
     static byte[] iclcmData;
+    static byte[] rndmData;
 
     /* Data for receiving */
     static byte[] camRecData;
     static byte[] denmRecData;
     static byte[] iclcmRecData;
+    static byte[] rndmRecData;
 
     private static class CamService implements Runnable{
         public void run(){
@@ -149,8 +157,38 @@ public class RnditsTestSuite{
             }
             System.out.println("[iCLCM] Stopping service!");
         }
-
     }
+
+    private static class RndmService implements Runnable{
+        public void run(){
+            System.out.println("[RNDM] Starting service at " + RNDM_RATE + "Hz!");
+            ByteBuffer iclcmBuffer = ByteBuffer.wrap(rndmData);
+            while(rndmData != null){
+                DatagramPacket packet;
+                try{
+                    packet =
+                        new DatagramPacket(rndmData, rndmData.length,
+                                           InetAddress.getByName(VEHICLE_ADAPTER_IP),
+                                           VEHICLE_ADAPTER_UDP_PORT);
+                }catch(UnknownHostException e){
+                    packet = null;
+                }
+
+                try{
+                    Thread.sleep(1000/RNDM_RATE);
+                }catch(InterruptedException e){
+                    System.out.println("[RNDM] Service interrupted during sleep.");
+                }
+                
+                try{
+                    send.send(packet);
+                }catch(IOException e){
+                    System.out.println("[ERROR] Failed to send RNDM!");
+                }
+            }
+            System.out.println("[RNDM] Stopping service!");
+        }
+    }    
 
     public static int getGenerationDeltaTime(){
         Instant instant = Instant.now();
@@ -254,6 +292,35 @@ public class RnditsTestSuite{
                                    + "\t #messages: " + numMessages
                                    + "\t Rate: " + messageRate
                                    + "\t Data: " + packet.getData());                    
+            break;
+        case 9:
+            rndmRecData = packet.getData();
+
+            /*
+            numMessages = rndmTable.get(stationId);
+            numMessages++;
+            rndmTable.put(stationId, numMessages);
+
+            messageRate = numMessages * 1000000 /
+                (System.currentTimeMillis() - startTime);
+            */
+            
+            System.out.println("Sent length: " + rndmData.length + " Received length: " + rndmRecData.length);            
+            if(Arrays.equals(rndmData,rndmRecData)){
+
+            } else {
+                for(int i = 0;i < rndmRecData.length;i++){
+                    if(rndmData[i] != rndmRecData[i]) System.out.println("Byte " + i + " should be " + rndmData[i] + " but is " + rndmRecData[i]);
+                }
+            }
+
+            /*
+            if(verbosity > 1)                    
+                System.out.println("[Received] RNDM\t ID: " + stationId
+                                   + "\t #messages: " + numMessages
+                                   + "\t Rate: " + messageRate
+                                   + "\t Data: " + packet.getData());                    
+            */
             break;
         default:            
             System.out.println("WARN: Received packet with unknown message ID " +
@@ -541,6 +608,15 @@ public class RnditsTestSuite{
         iclcmRecData = new byte[buffer.length];
     }
 
+    static void setupRndm(){
+        byte[] buffer = new byte[MAX_UDP_SIZE];
+        new Random().nextBytes(buffer);
+        buffer[0] = 9;
+
+        rndmData = buffer;
+        rndmRecData = new byte[buffer.length];
+    }    
+
     public static void main(String args[]) throws IOException{
         System.out.println("RNDITS Test Suite. A small application for evaluating the open source Geonetworking Vehicle Adapter. Author: Albin Severinson.\n" +
                            "Usage: 'java RnditsTestSuite' followed by any of these arguments:\n" +
@@ -567,6 +643,7 @@ public class RnditsTestSuite{
         boolean withCam = true;
         boolean withDenm = true;
         boolean withIclcm = true;
+        boolean withRndm = true;
         for(int i = 0;i < args.length;i++){
             String s = args[i];
             if(s.equals("--nocam")) withCam = false; 
@@ -644,6 +721,7 @@ public class RnditsTestSuite{
         setupCam();
         setupDenm();
         setupIclcm();
+        setupRndm();
         
         /* Set up sockets */
         send = new DatagramSocket();
@@ -668,6 +746,12 @@ public class RnditsTestSuite{
 
         if(withIclcm){
             Thread is = new Thread(new IclcmService());
+            is.setPriority(10);
+            is.start();
+        }
+
+        if(withRndm){
+            Thread is = new Thread(new RndmService());
             is.setPriority(10);
             is.start();
         }
